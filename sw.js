@@ -1,4 +1,4 @@
-const CACHE_NAME = "carteirada-shell-v2";
+const CACHE_NAME = "carteirada-shell-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,8 @@ const ASSETS = [
   "./icon192.png",
   "./icon512.png"
 ];
+// arquivos que precisam sempre buscar a rede primeiro (nunca servir versão antiga do cache)
+const NETWORK_FIRST = ["credenciais.json", "revogados.json"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -23,12 +25,13 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// credenciais.json precisa sempre tentar a rede primeiro (pra novos acessos
-// aparecerem na hora); o resto do app usa cache primeiro, pra abrir rápido e offline.
+// credenciais.json e revogados.json sempre tentam a rede primeiro (pra novos
+// acessos e revogações valerem na hora); o resto do app usa cache primeiro,
+// pra abrir rápido e continuar funcionando offline.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
-  if (event.request.url.includes("credenciais.json")) {
+  if (NETWORK_FIRST.some((nome) => event.request.url.includes(nome))) {
     event.respondWith(
       fetch(event.request, { cache: "no-store" })
         .then((resp) => {

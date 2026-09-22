@@ -1,4 +1,4 @@
-const CACHE_NAME = "carteirada-shell-v1";
+const CACHE_NAME = "carteirada-shell-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -23,9 +23,23 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// estratégia "cache first, fallback pra rede": garante que o app abra mesmo sem internet
+// credenciais.json precisa sempre tentar a rede primeiro (pra novos acessos
+// aparecerem na hora); o resto do app usa cache primeiro, pra abrir rápido e offline.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  if (event.request.url.includes("credenciais.json")) {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" })
+        .then((resp) => {
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resp.clone()));
+          return resp;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

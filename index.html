@@ -222,6 +222,23 @@
   .access-input-field{ padding:12px 16px; }
   .access-input-field input{ font-size:16px; letter-spacing:0.5px; }
 
+  .sync-result{
+    display:none; margin-top:6px; background:var(--bg-panel);
+    border:1px solid rgba(176,141,62,0.35); border-radius:12px; padding:14px;
+  }
+  .sync-result.show{ display:block; }
+  .sync-result-title{ margin:0 0 6px; font-size:13px; color:var(--ok); font-weight:700; }
+  .sync-result-hint{ margin:0 0 10px; font-size:12px; color:var(--text-dim); line-height:1.5; }
+  .sync-result-hint code{ background:var(--bg-panel-2); padding:1px 5px; border-radius:4px; color:var(--gold-bright); font-size:11px; }
+  #sync-snippet{
+    width:100%; background:var(--bg-panel-2); border:1px solid var(--steel); border-radius:8px;
+    color:var(--text); font-family:monospace; font-size:10.5px; padding:8px; resize:none;
+  }
+  .sync-copy-btn{
+    width:100%; margin-top:8px; padding:10px; border-radius:10px; border:1px solid var(--steel);
+    background:var(--bg-panel-2); color:var(--text); font-size:12.5px; font-weight:600;
+  }
+
   @keyframes fadeIn{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
   @keyframes shake{ 0%,100%{transform:translateX(0);} 25%{transform:translateX(-6px);} 75%{transform:translateX(6px);} }
 </style>
@@ -298,6 +315,13 @@
       </div>
       <div class="error-msg" id="access-error">Digite um número válido (11 dígitos).</div>
       <button class="unlock-btn" id="access-add-btn">Adicionar acesso</button>
+
+      <div class="sync-result" id="sync-result">
+        <p class="sync-result-title">✅ Adicionado neste celular.</p>
+        <p class="sync-result-hint">Pra funcionar em <b>outros aparelhos</b> também, cole esta linha dentro do arquivo <code>credenciais.json</code> no GitHub, entre colchetes <code>[ ]</code> (separe por vírgula se já tiver outras linhas lá):</p>
+        <textarea id="sync-snippet" readonly rows="3"></textarea>
+        <button class="sync-copy-btn" id="sync-copy-btn">Copiar linha</button>
+      </div>
     </div>
   </div>
 
@@ -411,6 +435,29 @@ async function garantirCredencialInicial() {
   }
 }
 
+async function sincronizarCredenciaisRemotas() {
+  // busca o arquivo credenciais.json hospedado junto do site (GitHub Pages).
+  // se a pessoa está offline ou o arquivo não existe, falha em silêncio —
+  // o app segue funcionando normalmente com o que já está salvo localmente.
+  try {
+    const resp = await fetch("./credenciais.json", { cache: "no-store" });
+    if (!resp.ok) return;
+    const remotas = await resp.json();
+    if (!Array.isArray(remotas)) return;
+
+    const locais = await getCredenciais();
+    const hashesLocais = new Set(locais.map(c => c.hash));
+
+    for (const r of remotas) {
+      if (r && r.hash && !hashesLocais.has(r.hash)) {
+        await addCredencial(r.hash, r.label || "", !!r.isAdmin);
+      }
+    }
+  } catch (err) {
+    // sem internet ou arquivo indisponível: segue com as credenciais já conhecidas
+  }
+}
+
 async function migrarFotosAntigas() {
   // fotos criadas antes do isolamento por usuário não tinham "ownerHash";
   // aqui elas são atribuídas ao Titular, para não ficarem visíveis a outros acessos.
@@ -461,6 +508,9 @@ const accessLabelInput = document.getElementById("access-label-input");
 const accessCpfInput = document.getElementById("access-cpf-input");
 const accessError = document.getElementById("access-error");
 const accessAddBtn = document.getElementById("access-add-btn");
+const syncResult = document.getElementById("sync-result");
+const syncSnippet = document.getElementById("sync-snippet");
+const syncCopyBtn = document.getElementById("sync-copy-btn");
 
 const lockBg = document.getElementById("lock-bg");
 const lockBgOverlay = document.getElementById("lock-bg-overlay");
@@ -726,6 +776,7 @@ organizeDone.addEventListener("click", async () => {
 accessItem.addEventListener("click", async () => {
   sheetOverlay.classList.remove("show");
   if (!currentIsAdmin) return;
+  syncResult.classList.remove("show");
   await renderAccessList();
   accessScreen.classList.add("show");
 });
@@ -773,6 +824,7 @@ accessAddBtn.addEventListener("click", async () => {
   if (digits.length !== 11) {
     accessError.textContent = "Digite um número válido (11 dígitos).";
     accessError.classList.add("show");
+    syncResult.classList.remove("show");
     return;
   }
   const hash = await sha256Hex(digits);
@@ -780,13 +832,27 @@ accessAddBtn.addEventListener("click", async () => {
   if (credenciais.some(c => c.hash === hash)) {
     accessError.textContent = "Esse número já tem acesso.";
     accessError.classList.add("show");
+    syncResult.classList.remove("show");
     return;
   }
-  await addCredencial(hash, accessLabelInput.value.trim(), false);
+  const label = accessLabelInput.value.trim();
+  await addCredencial(hash, label, false);
   accessLabelInput.value = "";
   accessCpfInput.value = "";
   accessError.classList.remove("show");
   await renderAccessList();
+
+  const snippet = `{ "hash": "${hash}", "label": "${label.replace(/"/g, "'")}", "isAdmin": false }`;
+  syncSnippet.value = snippet;
+  syncResult.classList.add("show");
+});
+
+syncCopyBtn.addEventListener("click", async () => {
+  syncSnippet.select();
+  try { await navigator.clipboard.writeText(syncSnippet.value); }
+  catch { document.execCommand("copy"); }
+  syncCopyBtn.textContent = "Copiado!";
+  setTimeout(() => syncCopyBtn.textContent = "Copiar linha", 2000);
 });
 
 async function renderOrganizeList() {
@@ -836,6 +902,7 @@ lockBg.src = `data:image/png;base64,${IDAUTH_BG_B64}`;
     db = await openDB();
     await garantirCredencialInicial();
     await migrarFotosAntigas();
+    await sincronizarCredenciaisRemotas();
   }
   catch (err) {
     alert("Não foi possível acessar o armazenamento local. Abra este arquivo pelo Chrome (não pelo Gerenciador de Arquivos).");

@@ -637,7 +637,7 @@ function drawFrame(direction) {
 /* ---------- zoom (pinça com dois dedos + duplo toque) e navegação por arraste ---------- */
 let zoomScale = 1, panX = 0, panY = 0;
 let isPinching = false, pinchStartDist = 0, pinchStartScale = 1;
-let isPanning = false, panOriginX = 0, panOriginY = 0;
+let isPanning = false, panOriginX = 0, panOriginY = 0, podeArrastar = false;
 let isSwiping = false, swipeDx = 0;
 let touchStartX = 0, touchStartY = 0, moved = false;
 let lastTapTime = 0, tapTimeout = null;
@@ -694,7 +694,7 @@ photoFrame.addEventListener("touchstart", (e) => {
     moved = false;
     swipeDx = 0;
     if (zoomScale > 1) {
-      isPanning = true;
+      podeArrastar = true;
       panOriginX = panX; panOriginY = panY;
     }
   }
@@ -707,15 +707,20 @@ photoFrame.addEventListener("touchmove", (e) => {
     zoomScale = Math.min(4, Math.max(1, pinchStartScale * (dist / pinchStartDist)));
     clampPan();
     applyZoomTransform();
-  } else if (isPanning && e.touches.length === 1) {
-    e.preventDefault();
+  } else if (podeArrastar && e.touches.length === 1) {
     const dx = e.touches[0].clientX - touchStartX;
     const dy = e.touches[0].clientY - touchStartY;
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
-    panX = panOriginX + dx;
-    panY = panOriginY + dy;
-    clampPan();
-    applyZoomTransform();
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      moved = true;
+      isPanning = true; // só vira arraste de verdade quando o dedo se move de fato
+    }
+    if (isPanning) {
+      e.preventDefault();
+      panX = panOriginX + dx;
+      panY = panOriginY + dy;
+      clampPan();
+      applyZoomTransform();
+    }
   } else if (e.touches.length === 1) {
     const dx = e.touches[0].clientX - touchStartX;
     const dy = e.touches[0].clientY - touchStartY;
@@ -741,7 +746,11 @@ photoFrame.addEventListener("touchend", () => {
     if (zoomScale <= 1.02) { zoomScale = 1; panX = 0; panY = 0; applyZoomTransform(); }
     return;
   }
-  if (isPanning) { isPanning = false; return; }
+  if (podeArrastar) {
+    podeArrastar = false;
+    if (isPanning) { isPanning = false; return; } // foi um arraste de verdade, não um toque
+    // dedo não se moveu: cai pra lógica de toque normal abaixo (permite duplo toque desfazer o zoom)
+  }
 
   if (isSwiping) {
     isSwiping = false;

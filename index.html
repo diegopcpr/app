@@ -104,6 +104,10 @@
     width:100%; height:100%; object-fit:contain; display:block;
     transform-origin:center center; will-change:transform;
   }
+  .photo-frame img.enter-right{ animation:enterFromRight .22s ease; }
+  .photo-frame img.enter-left{ animation:enterFromLeft .22s ease; }
+  @keyframes enterFromRight{ from{ transform:translateX(36px); opacity:0; } to{ transform:translateX(0); opacity:1; } }
+  @keyframes enterFromLeft{ from{ transform:translateX(-36px); opacity:0; } to{ transform:translateX(0); opacity:1; } }
   .dots{ display:flex; gap:6px; }
   .dots span{
     width:6px; height:6px; border-radius:50%; background:var(--steel);
@@ -607,7 +611,7 @@ async function renderGallery(showIndex) {
   drawFrame();
 }
 
-function drawFrame() {
+function drawFrame(direction) {
   zoomScale = 1; panX = 0; panY = 0;
   if (fotosCache.length === 0) {
     photoFrame.innerHTML = `
@@ -619,7 +623,8 @@ function drawFrame() {
     return;
   }
   const foto = fotosCache[currentIndex];
-  photoFrame.innerHTML = `<img src="${foto.dataUrl}" alt="Foto">`;
+  const animClass = direction === "right" ? "enter-right" : direction === "left" ? "enter-left" : "";
+  photoFrame.innerHTML = `<img src="${foto.dataUrl}" alt="Foto" class="${animClass}">`;
 
   dotsWrap.innerHTML = "";
   fotosCache.forEach((_, i) => {
@@ -629,12 +634,14 @@ function drawFrame() {
   });
 }
 
-/* ---------- zoom (pinça com dois dedos + duplo toque) ---------- */
+/* ---------- zoom (pinça com dois dedos + duplo toque) e navegação por arraste ---------- */
 let zoomScale = 1, panX = 0, panY = 0;
 let isPinching = false, pinchStartDist = 0, pinchStartScale = 1;
 let isPanning = false, panOriginX = 0, panOriginY = 0;
+let isSwiping = false, swipeDx = 0;
 let touchStartX = 0, touchStartY = 0, moved = false;
 let lastTapTime = 0, tapTimeout = null;
+const SWIPE_THRESHOLD = 45;
 
 function getDistance(t1, t2) {
   const dx = t1.clientX - t2.clientX;
@@ -668,7 +675,12 @@ function toggleZoom(clientX, clientY) {
 function advancePhoto() {
   if (fotosCache.length <= 1) return;
   currentIndex = (currentIndex + 1) % fotosCache.length;
-  drawFrame();
+  drawFrame("right");
+}
+function voltarPhoto() {
+  if (fotosCache.length <= 1) return;
+  currentIndex = (currentIndex - 1 + fotosCache.length) % fotosCache.length;
+  drawFrame("left");
 }
 
 photoFrame.addEventListener("touchstart", (e) => {
@@ -680,6 +692,7 @@ photoFrame.addEventListener("touchstart", (e) => {
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
     moved = false;
+    swipeDx = 0;
     if (zoomScale > 1) {
       isPanning = true;
       panOriginX = panX; panOriginY = panY;
@@ -707,6 +720,18 @@ photoFrame.addEventListener("touchmove", (e) => {
     const dx = e.touches[0].clientX - touchStartX;
     const dy = e.touches[0].clientY - touchStartY;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) moved = true;
+    // arraste horizontal pra navegar entre fotos (só quando a foto não está com zoom)
+    if (zoomScale <= 1 && Math.abs(dx) > Math.abs(dy)) {
+      e.preventDefault();
+      isSwiping = true;
+      swipeDx = dx;
+      const img = photoFrame.querySelector("img");
+      if (img) {
+        img.style.transition = "none";
+        img.style.transform = `translateX(${dx}px)`;
+        img.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx) / 400));
+      }
+    }
   }
 }, { passive: false });
 
@@ -717,8 +742,24 @@ photoFrame.addEventListener("touchend", () => {
     return;
   }
   if (isPanning) { isPanning = false; return; }
+
+  if (isSwiping) {
+    isSwiping = false;
+    const img = photoFrame.querySelector("img");
+    if (Math.abs(swipeDx) > SWIPE_THRESHOLD) {
+      if (swipeDx < 0) advancePhoto(); else voltarPhoto();
+    } else if (img) {
+      // não passou do limite: volta suavemente pro lugar
+      img.style.transition = "transform .2s ease, opacity .2s ease";
+      img.style.transform = "translateX(0)";
+      img.style.opacity = "1";
+    }
+    return;
+  }
+
   if (fotosCache.length === 0 || moved) return;
 
+  // toque (sem arraste) serve só pra zoom: duplo toque alterna zoom in/out
   const now = Date.now();
   if (now - lastTapTime < 300) {
     clearTimeout(tapTimeout);
@@ -726,10 +767,7 @@ photoFrame.addEventListener("touchend", () => {
     toggleZoom(touchStartX, touchStartY);
   } else {
     lastTapTime = now;
-    tapTimeout = setTimeout(() => {
-      if (zoomScale <= 1) advancePhoto();
-      lastTapTime = 0;
-    }, 300);
+    tapTimeout = setTimeout(() => { lastTapTime = 0; }, 300);
   }
 });
 
